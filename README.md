@@ -20,6 +20,8 @@ When used in a Kubernetes environment, Tetragon is Kubernetes-aware - that is, i
 Kubernetes identities such as namespaces, pods and so-on - so that security event detection
 can be configured in relation to individual workloads.
 
+![Tetragon Overview Diagram](docs/images/smart_observability.png)
+
 ## Functionality Overview #
 
 ### eBPF Real-Time ##
@@ -418,7 +420,7 @@ specify additional directories or specific files if needed.
 As a first step, let's apply the following `TracingPolicy`:
 
 ```bash
-kubectl apply -f ./crds/examples/sys_write_follow_fd_prefix.yaml
+kubectl apply -f https://raw.githubusercontent.com/cilium/tetragon/main/crds/examples/sys_write_follow_fd_prefix.yaml
 ```
 
 As a second step, let's start monitoring the events from the `xwing` pod:
@@ -532,7 +534,7 @@ kubectl delete -f ./crds/examples/sys_write_follow_fd_prefix.yaml
 To view TCP connect events apply the example TCP connect `TracingPolicy`:
 
 ```bash
-kubectl apply -f ./crds/examples/tcp-connect.yaml
+kubectl apply -f https://raw.githubusercontent.com/cilium/tetragon/main/crds/examples/tcp-connect.yaml
 ```
 
 To start monitoring events in the `xwing` pod run the Tetragon CLI:
@@ -584,7 +586,7 @@ kubectl logs -n kube-system ds/tetragon -c export-stdout -f | tetragon observe -
 
 In another terminal let's apply the privileged PodSpec:
 ```bash
-kubectl apply -f ./testdata/specs/testpod.yaml
+kubectl apply -f https://raw.githubusercontent.com/cilium/tetragon/main/testdata/specs/testpod.yaml
 ```
 
 If you observe the output in the first terminal, you can see the container start with `CAP_SYS_ADMIN`:

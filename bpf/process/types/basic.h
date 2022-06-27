@@ -8,49 +8,58 @@
 #include "../bpf_process_event.h"
 
 /* Type IDs form API with user space generickprobe.go */
-enum { filter = -2,
-       nop = 0,
-       int_type = 1,
-       char_buf = 2,
-       char_iovec = 3,
-       size_type = 4,
-       skb_type = 5,
-       string_type = 6,
-       sock_type = 7,
-       cred_type = 8,
+enum {
+	filter = -2,
+	nop = 0,
+	int_type = 1,
+	char_buf = 2,
+	char_iovec = 3,
+	size_type = 4,
+	skb_type = 5,
+	string_type = 6,
+	sock_type = 7,
+	cred_type = 8,
 
-       s64_ty = 10,
-       u64_ty = 11,
-       s32_ty = 12,
-       u32_ty = 13,
+	s64_ty = 10,
+	u64_ty = 11,
+	s32_ty = 12,
+	u32_ty = 13,
 
-       filename_ty = 14,
-       path_ty = 15,
-       file_ty = 16,
-       fd_ty = 17,
+	filename_ty = 14,
+	path_ty = 15,
+	file_ty = 16,
+	fd_ty = 17,
 
-       nop_s64_ty = -10,
-       nop_u64_ty = -11,
-       nop_u32_ty = -12,
-       nop_s32_ty = -13,
+	/* const_buf_type is a type for buffers with static size that is passed
+	 * in the meta argument
+	 */
+	const_buf_type = 18,
+
+	nop_s64_ty = -10,
+	nop_u64_ty = -11,
+	nop_u32_ty = -12,
+	nop_s32_ty = -13,
 };
 
-enum { char_buf_enomem = -1,
-       char_buf_pagefault = -2,
-       char_buf_toolarge = -3,
-       char_buf_saved_for_retprobe = -4,
+enum {
+	char_buf_enomem = -1,
+	char_buf_pagefault = -2,
+	char_buf_toolarge = -3,
+	char_buf_saved_for_retprobe = -4,
 };
 
-enum { ACTION_POST = 0,
-       ACTION_FOLLOWFD = 1,
-       /* Actual SIGKILL value, but we dont want to pull headers in */
-       ACTION_SIGKILL = 2,
-       ACTION_UNFOLLOWFD = 3,
-       ACTION_OVERRIDE = 4,
-       ACTION_COPYFD = 5,
+enum {
+	ACTION_POST = 0,
+	ACTION_FOLLOWFD = 1,
+	/* Actual SIGKILL value, but we dont want to pull headers in */
+	ACTION_SIGKILL = 2,
+	ACTION_UNFOLLOWFD = 3,
+	ACTION_OVERRIDE = 4,
+	ACTION_COPYFD = 5,
 };
 
-enum { FGS_SIGKILL = 9,
+enum {
+	FGS_SIGKILL = 9,
 };
 
 struct selector_action {
@@ -355,18 +364,18 @@ copy_path(char *args, const struct path *arg)
 	 * -------------------------------
 	 * Next we set up the flags.
 	 */
-	asm volatile goto("r1 = *(u64 *)%[pid];\n"
-			  "r7 = *(u32 *)%[offset];\n"
-			  "if r7 s< 0 goto %l[a];\n"
-			  "if r7 s> 1188 goto %l[a];\n"
-			  "r1 += r7;\n"
-			  "r2 = *(u32 *)%[flags];\n"
-			  "*(u32 *)(r1 + 0) = r2;\n"
-			  :
-			  : [pid] "m"(args), [flags] "m"(flags),
-			    [offset] "+m"(size)
-			  : "r0", "r1", "r2", "r7", "memory"
-			  : a);
+	asm volatile goto(
+		"r1 = *(u64 *)%[pid];\n"
+		"r7 = *(u32 *)%[offset];\n"
+		"if r7 s< 0 goto %l[a];\n"
+		"if r7 s> 1188 goto %l[a];\n"
+		"r1 += r7;\n"
+		"r2 = *(u32 *)%[flags];\n"
+		"*(u32 *)(r1 + 0) = r2;\n"
+		:
+		: [pid] "m"(args), [flags] "m"(flags), [offset] "+m"(size)
+		: "r0", "r1", "r2", "r7", "memory"
+		: a);
 a:
 	size += sizeof(u32); // for the flags
 
@@ -687,7 +696,8 @@ filter_32ty(struct selector_arg_filter *filter, char *args)
 	return 0;
 }
 
-static inline __attribute__((always_inline)) size_t type_to_min_size(int type)
+static inline __attribute__((always_inline)) size_t type_to_min_size(int type,
+								     int argm)
 {
 	switch (type) {
 	case fd_ty:
@@ -711,6 +721,9 @@ static inline __attribute__((always_inline)) size_t type_to_min_size(int type)
 	case char_buf:
 	case char_iovec:
 		return 4;
+	case const_buf_type:
+		return argm;
+
 	// nop or something else we do not process here
 	default:
 		return 0;
@@ -1176,7 +1189,7 @@ static inline __attribute__((always_inline)) long
 read_call_arg(void *ctx, struct msg_generic_kprobe *e, int index, int type,
 	      long orig_off, unsigned long arg, int argm, void *filter_map)
 {
-	size_t min_size = type_to_min_size(type);
+	size_t min_size = type_to_min_size(type, argm);
 	char *args = e->args;
 	long size = -1;
 	const struct path *path_arg = 0;
@@ -1268,6 +1281,14 @@ read_call_arg(void *ctx, struct msg_generic_kprobe *e, int index, int type,
 	case char_iovec:
 		size = copy_char_iovec(ctx, orig_off, arg, argm, e);
 		break;
+	case const_buf_type: {
+		int err;
+
+		// bound size to 1023 to help the verifier out
+		size = argm & 0x03ff;
+		err = probe_read(args, size, (char *)arg);
+		break;
+	}
 	default:
 		size = 0;
 		break;

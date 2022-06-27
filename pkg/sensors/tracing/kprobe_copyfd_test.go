@@ -21,10 +21,11 @@ import (
 
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	ec "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker"
-	bc "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker/matchers/bytesmatcher"
-	lc "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker/matchers/listmatcher"
-	sm "github.com/cilium/tetragon/api/v1/tetragon/codegen/eventchecker/matchers/stringmatcher"
 	"github.com/cilium/tetragon/pkg/jsonchecker"
+	"github.com/cilium/tetragon/pkg/kernels"
+	bc "github.com/cilium/tetragon/pkg/matchers/bytesmatcher"
+	lc "github.com/cilium/tetragon/pkg/matchers/listmatcher"
+	sm "github.com/cilium/tetragon/pkg/matchers/stringmatcher"
 	"github.com/cilium/tetragon/pkg/observer"
 	"github.com/cilium/tetragon/pkg/testutils"
 	"github.com/stretchr/testify/assert"
@@ -33,6 +34,10 @@ import (
 )
 
 func TestCopyFd(t *testing.T) {
+	if !kernels.MinKernelVersion("5.3.0") {
+		t.Skip("TestCopyFd requires at least 5.3.0 version")
+	}
+
 	var doneWG, readyWG sync.WaitGroup
 	defer doneWG.Wait()
 
@@ -50,10 +55,16 @@ func TestCopyFd(t *testing.T) {
 	// makeSpecFile creates a new spec file bsed on the template, and the provided arguments
 	makeSpecFile := func(pid string) string {
 		data := map[string]string{
-			"MatchedPID":   pid,
-			"NamespacePID": "false",
+			"MatchedPID": pid,
 		}
-		specName, err := testutils.GetSpecFromTemplate("copyfd.yaml.tmpl", data)
+		// For kernels <= 5.10, dup syscall calls fd_install, which calls
+		// __fd_install. fd_install is inlined and if we hook there we miss
+		// the dup event. For kernels > 5.10 __fd_install is removed.
+		templatePath := "copyfd-fd_install.yaml.tmpl"
+		if kernels.IsKernelVersionLessThan("5.11.0") {
+			templatePath = "copyfd-__fd_install.yaml.tmpl"
+		}
+		specName, err := testutils.GetSpecFromTemplate(templatePath, data)
 		if err != nil {
 			t.Fatal(err)
 		}
